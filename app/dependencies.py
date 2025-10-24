@@ -5,6 +5,7 @@ import importlib
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Optional
 
 from app.services.deal_service import DealService
 from app.services.doc_builder import DocxBuilder
@@ -17,10 +18,16 @@ from app.services.storage import StorageService
 @lru_cache(maxsize=1)
 def get_repository() -> DealRepository:
     firestore_client = None
-    spec = importlib.util.find_spec("google.cloud.firestore")
-    if spec is not None:
+    firestore_module: Optional[object] = None
+    try:
         firestore_module = importlib.import_module("google.cloud.firestore")
-        firestore_client = firestore_module.Client()
+    except ModuleNotFoundError:
+        firestore_module = None
+    if firestore_module is not None:
+        try:
+            firestore_client = firestore_module.Client()
+        except Exception:
+            firestore_client = None
     collection = os.getenv("FIRESTORE_COLLECTION", "deals")
     return DealRepository(client=firestore_client, collection=collection)
 
