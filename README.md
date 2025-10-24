@@ -45,6 +45,20 @@ app/
    environment (project IDs, bucket names, invite URLs, etc.). The application
    automatically loads the `.env` file on startup.
 
+   ```dotenv
+   APP_ENV=development
+   API_TITLE="AI Startup Analyst"
+   DEBUG=False
+   GCP_PROJECT_ID=hackathon-472304
+   GCP_LOCATION=us-central1
+   STORAGE_BUCKET=investment_memo_ai
+   GOOGLE_API_KEY=AIzaSyCG_RaIGoBFlAMH89c_97LUpvVGOlbiO-w
+   GOOGLE_SEARCH_ENGINE_ID=27a87949557e54a04
+   ```
+
+   Replace any project-specific secrets (service account paths, Document AI
+   processor IDs, invite base URLs, etc.) before running the backend.
+
 3. **Run the server**
 
    ```bash
