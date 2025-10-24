@@ -39,7 +39,13 @@ app/
    > `google-cloud-storage`, `google-cloud-documentai`, `google-cloud-aiplatform`)
    > when you are ready to connect to production infrastructure.
 
-2. **Run the server**
+2. **Configure environment**
+
+   Copy the provided `.env` file and adjust the values to match your deployment
+   environment (project IDs, bucket names, invite URLs, etc.). The application
+   automatically loads the `.env` file on startup.
+
+3. **Run the server**
 
    ```bash
    uvicorn app.main:app --reload
@@ -48,7 +54,7 @@ app/
    The service exposes the documented endpoints such as `POST /upload`,
    `POST /generate_memo/{deal_id}`, and `GET /deals`.
 
-3. **Configure Google Cloud (optional)**
+4. **Configure Google Cloud (optional)**
 
    - Ensure `GOOGLE_APPLICATION_CREDENTIALS` is set and the respective APIs are
      enabled.

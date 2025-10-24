@@ -1,9 +1,13 @@
 """FastAPI application entry point for the AI Startup Analyst backend."""
 from __future__ import annotations
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from app.api.routes import router
+
+
+load_dotenv()
 
 
 def create_app() -> FastAPI:

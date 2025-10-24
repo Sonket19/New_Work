@@ -25,6 +25,8 @@ class DealService:
         metadata_extractor: MetadataExtractor,
         memo_generator: MemoGenerator,
         doc_builder: DocxBuilder,
+        *,
+        invite_base_url: str = "https://founder-chat.example.com/invite",
     ) -> None:
         self.repository = repository
         self.storage = storage
@@ -32,6 +34,7 @@ class DealService:
         self.metadata_extractor = metadata_extractor
         self.memo_generator = memo_generator
         self.doc_builder = doc_builder
+        self.invite_base_url = invite_base_url
 
     async def process_upload(self, upload: UploadFile) -> Dict[str, Any]:
         deal_id = uuid.uuid4().hex[:6]
@@ -166,7 +169,7 @@ class DealService:
             raise HTTPException(status_code=404, detail="Deal not found")
         token = uuid.uuid4().hex
         expires_at = datetime.utcnow() + timedelta(minutes=expires_in_minutes)
-        invite_url = f"https://founder-chat.example.com/invite/{token}"
+        invite_url = f"{self.invite_base_url.rstrip('/')}/{token}"
         invite = {
             "token": token,
             "founder_email": founder_email,
