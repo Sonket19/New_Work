@@ -4,7 +4,6 @@ from __future__ import annotations
 import importlib
 import os
 from functools import lru_cache
-from pathlib import Path
 from typing import Optional
 
 from app.services.deal_service import DealService
@@ -34,10 +33,8 @@ def get_repository() -> DealRepository:
 
 @lru_cache(maxsize=1)
 def get_storage() -> StorageService:
-    bucket_name = os.getenv("STORAGE_BUCKET", "investment_memo_ai")
-    base_dir_env = os.getenv("STORAGE_LOCAL_PATH")
-    base_dir = Path(base_dir_env) if base_dir_env else None
-    return StorageService(bucket_name=bucket_name, base_dir=base_dir)
+    bucket_name = os.getenv("GCS_BUCKET_NAME") or os.getenv("STORAGE_BUCKET", "investment_memo_ai")
+    return StorageService(bucket_name=bucket_name)
 
 
 @lru_cache(maxsize=1)
