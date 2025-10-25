@@ -71,7 +71,23 @@ class DocumentExtractor:
 
         mime_type = content_type or "application/pdf"
         raw_document = documentai.RawDocument(content=file_bytes, mime_type=mime_type)
-        request = documentai.ProcessRequest(name=self.processor_name, raw_document=raw_document)
+        process_options = None
+        if hasattr(documentai, "ProcessOptions") and hasattr(documentai, "OcrConfig"):
+            try:
+                ocr_config = documentai.OcrConfig(enable_imageless_mode=True)
+            except TypeError:  # pragma: no cover - older client libraries
+                ocr_config = None
+            if ocr_config is not None:
+                try:
+                    process_options = documentai.ProcessOptions(ocr_config=ocr_config)
+                except TypeError:  # pragma: no cover - older client libraries
+                    process_options = None
+
+        request_kwargs = {"name": self.processor_name, "raw_document": raw_document}
+        if process_options is not None:
+            request_kwargs["process_options"] = process_options
+
+        request = documentai.ProcessRequest(**request_kwargs)
         result = self.client.process_document(request=request)
 
         document = result.document
