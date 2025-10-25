@@ -1,6 +1,7 @@
 """Utilities for parsing uploaded artefacts and extracting metadata."""
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -19,6 +20,9 @@ else:
     _DOCUMENT_AI_IMPORT_ERROR = None  # type: ignore[name-defined]
 
 from google.oauth2 import service_account
+
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentExtractor:
@@ -93,42 +97,137 @@ class DocumentExtractor:
         }
         return {"pitch_deck": text, "analysis": analysis}
 
-    def _build_imageless_options(self) -> documentai.ProcessOptions:
+    def _build_imageless_options(self) -> Optional[documentai.ProcessOptions]:
         """Construct ProcessOptions that force imageless OCR mode when supported."""
 
-        if not hasattr(documentai, "ProcessOptions") or not hasattr(documentai, "OcrConfig"):
-            raise RuntimeError(
-                "Installed google-cloud-documentai library is too old for imageless mode."
+        if not hasattr(documentai, "ProcessOptions"):
+            logger.warning(
+                "google-cloud-documentai %s does not expose ProcessOptions; skipping imageless mode",
+                getattr(documentai, "__version__", "unknown"),
             )
+            return None
 
         try:
             process_options = documentai.ProcessOptions()
-        except TypeError as exc:  # pragma: no cover - legacy client that can't init without args
-            raise RuntimeError(
-                "Unable to construct Document AI ProcessOptions; upgrade google-cloud-documentai."
-            ) from exc
+        except TypeError:  # pragma: no cover - legacy client that can't init without args
+            logger.warning(
+                "google-cloud-documentai %s cannot instantiate ProcessOptions without args; skipping imageless mode",
+                getattr(documentai, "__version__", "unknown"),
+            )
+            return None
+
+        config_paths = self._imageless_config_candidates(process_options)
+        if not config_paths:
+            logger.warning(
+                "ProcessOptions missing ocr_config/document_ocr_config; skipping imageless mode",
+                extra={"documentai_version": getattr(documentai, "__version__", "unknown")},
+            )
+            return None
+
+        for attr_name, config_cls in config_paths:
+            config = self._instantiate_ocr_config(config_cls)
+            if config is None:
+                continue
+
+            if not self._apply_imageless_flags(config):
+                continue
+
+            try:
+                setattr(process_options, attr_name, config)
+            except Exception:  # pragma: no cover - defensive guard against proto attr changes
+                logger.debug(
+                    "Failed to set %s on ProcessOptions", attr_name, exc_info=True
+                )
+                continue
+
+            logger.info(
+                "Applied imageless mode via %s", attr_name,
+                extra={
+                    "documentai_version": getattr(documentai, "__version__", "unknown"),
+                    "config_cls": getattr(config_cls, "__name__", str(config_cls)),
+                },
+            )
+            return process_options
+
+        logger.warning(
+            "google-cloud-documentai %s does not support imageless mode toggles; continuing without it",
+            getattr(documentai, "__version__", "unknown"),
+        )
+        return None
+
+    def _imageless_config_candidates(self, process_options: Any) -> List[Tuple[str, Any]]:
+        """Return potential ProcessOptions attributes and constructors for imageless OCR."""
+
+        candidates: List[Tuple[str, Any]] = []
+
+        ocr_config_cls = getattr(documentai, "OcrConfig", None)
+        if hasattr(process_options, "ocr_config") and ocr_config_cls is not None:
+            candidates.append(("ocr_config", ocr_config_cls))
+
+        if hasattr(process_options, "document_ocr_config"):
+            document_ocr_cls = getattr(documentai, "DocumentOcrConfig", None)
+            if document_ocr_cls is not None:
+                candidates.append(("document_ocr_config", document_ocr_cls))
+            elif ocr_config_cls is not None:
+                candidates.append(("document_ocr_config", ocr_config_cls))
+
+        return candidates
+
+    def _instantiate_ocr_config(self, config_cls: Any) -> Optional[Any]:
+        """Instantiate the given OCR config proto, logging if the client is too old."""
 
         try:
-            ocr_config = documentai.OcrConfig()
-        except TypeError as exc:  # pragma: no cover - legacy client that can't init without args
-            raise RuntimeError(
-                "Unable to construct Document AI OcrConfig; upgrade google-cloud-documentai."
-            ) from exc
-
-        if not hasattr(ocr_config, "enable_imageless_mode"):
-            raise RuntimeError(
-                "Document AI client library does not expose imageless mode. "
-                "Upgrade google-cloud-documentai to a version that supports OcrConfig.enable_imageless_mode."
+            return config_cls()
+        except TypeError:  # pragma: no cover - legacy client that can't init without args
+            logger.warning(
+                "google-cloud-documentai %s cannot instantiate %s without args; skipping imageless mode",
+                getattr(documentai, "__version__", "unknown"),
+                getattr(config_cls, "__name__", str(config_cls)),
             )
-
-        setattr(ocr_config, "enable_imageless_mode", True)
-        if not hasattr(process_options, "ocr_config"):
-            raise RuntimeError(
-                "Document AI ProcessOptions is missing the ocr_config field required for imageless mode."
+        except Exception:  # pragma: no cover - defensive guard against proto attr changes
+            logger.debug(
+                "Unexpected error instantiating %s for imageless mode", config_cls,
+                exc_info=True,
             )
+        return None
 
-        process_options.ocr_config = ocr_config
-        return process_options
+    def _apply_imageless_flags(self, config: Any) -> bool:
+        """Attempt to switch imageless mode on for the provided OCR config proto."""
+
+        applied = False
+
+        if hasattr(config, "enable_imageless_mode"):
+            try:
+                setattr(config, "enable_imageless_mode", True)
+            except Exception:  # pragma: no cover - defensive guard against proto attr changes
+                logger.debug(
+                    "Failed to set enable_imageless_mode on %s", config.__class__.__name__,
+                    exc_info=True,
+                )
+            else:
+                applied = True
+
+        advanced_options = getattr(config, "advanced_ocr_options", None)
+        if advanced_options is not None:
+            try:
+                if hasattr(advanced_options, "append"):
+                    if "ENABLE_IMAGELESS_MODE" not in advanced_options:
+                        advanced_options.append("ENABLE_IMAGELESS_MODE")
+                else:  # pragma: no cover - fallback for immutable containers
+                    updated = list(advanced_options)
+                    if "ENABLE_IMAGELESS_MODE" not in updated:
+                        updated.append("ENABLE_IMAGELESS_MODE")
+                    setattr(config, "advanced_ocr_options", updated)
+            except Exception:  # pragma: no cover - defensive guard against proto attr changes
+                logger.debug(
+                    "Failed to append ENABLE_IMAGELESS_MODE to advanced_ocr_options on %s",
+                    config.__class__.__name__,
+                    exc_info=True,
+                )
+            else:
+                applied = True
+
+        return applied
 
     def _serialize_entity(self, entity: documentai.Document.Entity) -> Dict[str, Any]:
         return {
