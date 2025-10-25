@@ -33,13 +33,19 @@ def get_repository() -> DealRepository:
 
 @lru_cache(maxsize=1)
 def get_storage() -> StorageService:
-    bucket_name = os.getenv("GCS_BUCKET_NAME") or os.getenv("STORAGE_BUCKET", "investment_memo_ai")
+    bucket_name = os.getenv("GCS_BUCKET_NAME")
+    if not bucket_name:
+        raise RuntimeError("GCS_BUCKET_NAME must be configured for StorageService")
     return StorageService(bucket_name=bucket_name)
 
 
 @lru_cache(maxsize=1)
 def get_extractor() -> DocumentExtractor:
-    return DocumentExtractor()
+    return DocumentExtractor(
+        project_id=os.getenv("GCP_PROJECT_ID"),
+        location=os.getenv("GCP_LOCATION"),
+        processor_id=os.getenv("DOCUMENT_AI_PROCESSOR"),
+    )
 
 
 @lru_cache(maxsize=1)

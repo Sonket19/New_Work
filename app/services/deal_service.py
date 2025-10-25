@@ -80,6 +80,7 @@ class DealService:
                 "news": [],
                 "market_stats": {},
                 "founder_profile": [],
+                "startup_analysis": extracted_text_raw.get("analysis", {}),
             },
             "metadata": {
                 "weightage": weightage,
@@ -95,6 +96,7 @@ class DealService:
             "extracted_text": {
                 "pitch_deck": {
                     "raw_text": extracted_text_raw.get("pitch_deck", ""),
+                    "analysis": extracted_text_raw.get("analysis", {}),
                 }
             },
             "memo": {
