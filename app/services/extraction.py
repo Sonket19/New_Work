@@ -71,17 +71,7 @@ class DocumentExtractor:
 
         mime_type = content_type or "application/pdf"
         raw_document = documentai.RawDocument(content=file_bytes, mime_type=mime_type)
-        process_options = None
-        if hasattr(documentai, "ProcessOptions") and hasattr(documentai, "OcrConfig"):
-            try:
-                ocr_config = documentai.OcrConfig(enable_imageless_mode=True)
-            except (TypeError, ValueError):  # pragma: no cover - older client libraries
-                ocr_config = None
-            if ocr_config is not None:
-                try:
-                    process_options = documentai.ProcessOptions(ocr_config=ocr_config)
-                except TypeError:  # pragma: no cover - older client libraries
-                    process_options = None
+        process_options = self._build_imageless_options()
 
         request_kwargs = {"name": self.processor_name, "raw_document": raw_document}
         if process_options is not None:
@@ -102,6 +92,43 @@ class DocumentExtractor:
             "pages": [self._serialize_page(page, text) for page in pages],
         }
         return {"pitch_deck": text, "analysis": analysis}
+
+    def _build_imageless_options(self) -> documentai.ProcessOptions:
+        """Construct ProcessOptions that force imageless OCR mode when supported."""
+
+        if not hasattr(documentai, "ProcessOptions") or not hasattr(documentai, "OcrConfig"):
+            raise RuntimeError(
+                "Installed google-cloud-documentai library is too old for imageless mode."
+            )
+
+        try:
+            process_options = documentai.ProcessOptions()
+        except TypeError as exc:  # pragma: no cover - legacy client that can't init without args
+            raise RuntimeError(
+                "Unable to construct Document AI ProcessOptions; upgrade google-cloud-documentai."
+            ) from exc
+
+        try:
+            ocr_config = documentai.OcrConfig()
+        except TypeError as exc:  # pragma: no cover - legacy client that can't init without args
+            raise RuntimeError(
+                "Unable to construct Document AI OcrConfig; upgrade google-cloud-documentai."
+            ) from exc
+
+        if not hasattr(ocr_config, "enable_imageless_mode"):
+            raise RuntimeError(
+                "Document AI client library does not expose imageless mode. "
+                "Upgrade google-cloud-documentai to a version that supports OcrConfig.enable_imageless_mode."
+            )
+
+        setattr(ocr_config, "enable_imageless_mode", True)
+        if not hasattr(process_options, "ocr_config"):
+            raise RuntimeError(
+                "Document AI ProcessOptions is missing the ocr_config field required for imageless mode."
+            )
+
+        process_options.ocr_config = ocr_config
+        return process_options
 
     def _serialize_entity(self, entity: documentai.Document.Entity) -> Dict[str, Any]:
         return {
