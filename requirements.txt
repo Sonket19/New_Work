@@ -4,3 +4,5 @@ pydantic
 python-multipart
 python-docx
 python-dotenv
+google-cloud-storage
+google-cloud-documentai
