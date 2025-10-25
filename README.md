@@ -3,16 +3,16 @@
 FastAPI backend that orchestrates the AI startup analyst workflow described in the
 specification. The implementation keeps the architecture modular so that Google
 Cloud services (Firestore, Storage, Document AI, Gemini) can be wired in where
-available, while providing local fallbacks so the API can run in development
-without external dependencies.
+available.
 
 ## Features
 
-- Upload PDFs/audio/video pitch materials and create a new deal entry.
+- Upload PDFs/audio/video pitch materials and create a new deal entry with
+  Google Document AI driven text extraction and startup analysis metadata.
 - Generate memo drafts using configurable weightings with regeneration support.
 - Persist deal state in Firestore or in-memory storage when Firestore is not
   available.
-- Store memo DOCX artefacts and original uploads in a bucket-like directory.
+- Store memo DOCX artefacts and original uploads in Google Cloud Storage.
 - Download generated documents and original pitch decks.
 - Manage founder outreach invites and persist founder chat transcripts.
 
@@ -35,9 +35,9 @@ app/
    pip install -r requirements.txt
    ```
 
-   > Optional: install the Google Cloud libraries (`google-cloud-firestore`,
-   > `google-cloud-storage`, `google-cloud-documentai`, `google-cloud-aiplatform`)
-   > when you are ready to connect to production infrastructure.
+   > Optional: install the additional Google Cloud libraries (`google-cloud-firestore`,
+   > `google-cloud-aiplatform`) when you are ready to connect to production
+   > infrastructure.
 
 2. **Configure environment**
 
@@ -51,15 +51,26 @@ app/
    DEBUG=False
    GCP_PROJECT_ID=hackathon-472304
    GCP_LOCATION=us-central1
-   STORAGE_BUCKET=investment_memo_ai
+   GCS_BUCKET_NAME=investment_memo_ai
    GOOGLE_API_KEY=AIzaSyCG_RaIGoBFlAMH89c_97LUpvVGOlbiO-w
    GOOGLE_SEARCH_ENGINE_ID=27a87949557e54a04
    ```
 
    Replace any project-specific secrets (service account paths, Document AI
-   processor IDs, invite base URLs, etc.) before running the backend.
+   processor IDs, invite base URLs, etc.) before running the backend. The upload
+   workflow now requires a configured Document AI processor and will raise an
+   error on startup if `DOCUMENT_AI_PROCESSOR`, `GCP_PROJECT_ID`, or
+   `GCP_LOCATION` are missing.
 
-3. **Run the server**
+3. **Configure Google Document AI**
+
+   Ensure the processor referenced by `DOCUMENT_AI_PROCESSOR` is deployed in the
+   target project/location and that the service account has the
+   `documentai.processor.use` permission. The backend calls
+   `DocumentProcessorServiceClient.process_document` for every upload and
+   persists the extracted text together with structured page/entity metadata.
+
+4. **Run the server**
 
    ```bash
    uvicorn app.main:app --reload
@@ -68,14 +79,12 @@ app/
    The service exposes the documented endpoints such as `POST /upload`,
    `POST /generate_memo/{deal_id}`, and `GET /deals`.
 
-4. **Configure Google Cloud (optional)**
+5. **Configure Google Cloud (optional)**
 
-   - Ensure `GOOGLE_APPLICATION_CREDENTIALS` is set and the respective APIs are
-     enabled.
+   - Ensure `GOOGLE_APPLICATION_CREDENTIALS` is set, the respective APIs are
+     enabled, and the configured storage bucket exists.
    - Replace the heuristic memo generation logic inside
      `app/services/memo_generator.py` with calls to Gemini 2.5 via Vertex AI.
-   - Replace the local storage implementation in `StorageService` with GCS
-     integration.
 
 ## Testing the workflow
 

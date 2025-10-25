@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Any, Dict
+from io import BytesIO
+from typing import Any, Dict, Tuple
 
 from fastapi import HTTPException, UploadFile
 
@@ -40,12 +40,15 @@ class DealService:
         deal_id = uuid.uuid4().hex[:6]
         file_bytes = await upload.read()
         filename = upload.filename or f"upload_{deal_id}"
-        storage_url = self.storage.upload_bytes(deal_id, filename, file_bytes)
+        content_type = upload.content_type or "application/octet-stream"
+        storage_url = self.storage.upload_bytes(
+            deal_id, filename, file_bytes, content_type=content_type
+        )
 
         extracted_text_raw = self.extractor.extract_text(
             deal_id=deal_id,
             file_bytes=file_bytes,
-            content_type=upload.content_type or "application/octet-stream",
+            content_type=content_type,
         )
         company_name, founders, sector = self.metadata_extractor.extract(
             deal_id=deal_id, extracted_text=extracted_text_raw
@@ -64,6 +67,7 @@ class DealService:
             deal_id,
             "memo.docx",
             docx_path.read_bytes(),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
 
         created_at = datetime.utcnow()
@@ -76,6 +80,7 @@ class DealService:
                 "news": [],
                 "market_stats": {},
                 "founder_profile": [],
+                "startup_analysis": extracted_text_raw.get("analysis", {}),
             },
             "metadata": {
                 "weightage": weightage,
@@ -91,6 +96,7 @@ class DealService:
             "extracted_text": {
                 "pitch_deck": {
                     "raw_text": extracted_text_raw.get("pitch_deck", ""),
+                    "analysis": extracted_text_raw.get("analysis", {}),
                 }
             },
             "memo": {
@@ -124,6 +130,7 @@ class DealService:
             deal_id,
             "memo.docx",
             docx_path.read_bytes(),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
 
         deal["metadata"]["weightage"] = payload.dict()
@@ -150,17 +157,19 @@ class DealService:
         self.repository.delete(deal_id)
         self.storage.delete_folder(deal_id)
 
-    def download_memo(self, deal_id: str) -> Path:
+    def download_memo(self, deal_id: str) -> Tuple[BytesIO, str, str]:
         self.get_deal(deal_id)
-        return self.storage.get_local_path(deal_id, "memo.docx")
+        file_obj, content_type = self.storage.download_file(deal_id, "memo.docx")
+        return file_obj, "memo.docx", content_type
 
-    def download_pitch_deck(self, deal_id: str) -> Path:
+    def download_pitch_deck(self, deal_id: str) -> Tuple[BytesIO, str, str]:
         deal = self.get_deal(deal_id)
         raw_url = deal.get("raw_files", {}).get("pitch_deck_url")
         if not raw_url:
             raise HTTPException(status_code=404, detail="Pitch deck not available")
         filename = raw_url.split("/")[-1]
-        return self.storage.get_local_path(deal_id, filename)
+        file_obj, content_type = self.storage.download_file(deal_id, filename)
+        return file_obj, filename, content_type
 
     def create_founder_invite(
         self, deal_id: str, *, founder_email: str, expires_in_minutes: int
