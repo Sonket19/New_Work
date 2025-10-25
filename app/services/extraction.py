@@ -1,6 +1,7 @@
 """Utilities for parsing uploaded artefacts and extracting metadata."""
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -19,6 +20,9 @@ else:
     _DOCUMENT_AI_IMPORT_ERROR = None  # type: ignore[name-defined]
 
 from google.oauth2 import service_account
+
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentExtractor:
@@ -93,39 +97,80 @@ class DocumentExtractor:
         }
         return {"pitch_deck": text, "analysis": analysis}
 
-    def _build_imageless_options(self) -> documentai.ProcessOptions:
+    def _build_imageless_options(self) -> Optional[documentai.ProcessOptions]:
         """Construct ProcessOptions that force imageless OCR mode when supported."""
 
-        if not hasattr(documentai, "ProcessOptions") or not hasattr(documentai, "OcrConfig"):
-            raise RuntimeError(
-                "Installed google-cloud-documentai library is too old for imageless mode."
+        if not hasattr(documentai, "ProcessOptions"):
+            logger.warning(
+                "google-cloud-documentai %s does not expose ProcessOptions; skipping imageless mode",
+                getattr(documentai, "__version__", "unknown"),
             )
+            return None
 
         try:
             process_options = documentai.ProcessOptions()
-        except TypeError as exc:  # pragma: no cover - legacy client that can't init without args
-            raise RuntimeError(
-                "Unable to construct Document AI ProcessOptions; upgrade google-cloud-documentai."
-            ) from exc
+        except TypeError:  # pragma: no cover - legacy client that can't init without args
+            logger.warning(
+                "google-cloud-documentai %s cannot instantiate ProcessOptions without args; skipping imageless mode",
+                getattr(documentai, "__version__", "unknown"),
+            )
+            return None
+
+        if not hasattr(documentai, "OcrConfig"):
+            logger.warning(
+                "google-cloud-documentai %s does not expose OcrConfig; skipping imageless mode",
+                getattr(documentai, "__version__", "unknown"),
+            )
+            return None
 
         try:
             ocr_config = documentai.OcrConfig()
-        except TypeError as exc:  # pragma: no cover - legacy client that can't init without args
-            raise RuntimeError(
-                "Unable to construct Document AI OcrConfig; upgrade google-cloud-documentai."
-            ) from exc
-
-        if not hasattr(ocr_config, "enable_imageless_mode"):
-            raise RuntimeError(
-                "Document AI client library does not expose imageless mode. "
-                "Upgrade google-cloud-documentai to a version that supports OcrConfig.enable_imageless_mode."
+        except TypeError:  # pragma: no cover - legacy client that can't init without args
+            logger.warning(
+                "google-cloud-documentai %s cannot instantiate OcrConfig without args; skipping imageless mode",
+                getattr(documentai, "__version__", "unknown"),
             )
+            return None
 
-        setattr(ocr_config, "enable_imageless_mode", True)
+        applied = False
+
+        if hasattr(ocr_config, "enable_imageless_mode"):
+            try:
+                setattr(ocr_config, "enable_imageless_mode", True)
+            except Exception:  # pragma: no cover - defensive guard against proto attr changes
+                logger.debug("Failed to set enable_imageless_mode on OcrConfig", exc_info=True)
+            else:
+                applied = True
+
+        advanced_options = getattr(ocr_config, "advanced_ocr_options", None)
+        if advanced_options is not None:
+            try:
+                if hasattr(advanced_options, "append"):
+                    if "ENABLE_IMAGELESS_MODE" not in advanced_options:
+                        advanced_options.append("ENABLE_IMAGELESS_MODE")
+                else:  # pragma: no cover - fallback for immutable containers
+                    updated = list(advanced_options)
+                    if "ENABLE_IMAGELESS_MODE" not in updated:
+                        updated.append("ENABLE_IMAGELESS_MODE")
+                    setattr(ocr_config, "advanced_ocr_options", updated)
+            except Exception:  # pragma: no cover - defensive guard against proto attr changes
+                logger.debug("Failed to append ENABLE_IMAGELESS_MODE to advanced_ocr_options", exc_info=True)
+            else:
+                applied = True
+
+        if not applied:
+            logger.warning(
+                "google-cloud-documentai %s does not support imageless mode toggles; continuing without it",
+                getattr(documentai, "__version__", "unknown"),
+            )
+            return None
+
         if not hasattr(process_options, "ocr_config"):
-            raise RuntimeError(
-                "Document AI ProcessOptions is missing the ocr_config field required for imageless mode."
+            logger.warning(
+                "ProcessOptions missing ocr_config attribute; skipping imageless mode",
+                extra={"documentai_version": getattr(documentai, "__version__", "unknown")},
             )
+            return None
 
         process_options.ocr_config = ocr_config
         return process_options
