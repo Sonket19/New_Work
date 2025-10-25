@@ -1,55 +1,88 @@
-"""Storage service abstraction used for Google Cloud Storage integration."""
+"""Storage service abstraction backed by Google Cloud Storage."""
 from __future__ import annotations
 
-import shutil
-from pathlib import Path
-from typing import BinaryIO, Optional
+import os
+from io import BytesIO
+from typing import BinaryIO
 
 from fastapi import UploadFile
+from google.api_core.exceptions import NotFound
+from google.cloud import storage
+from google.oauth2 import service_account
 
 
 class StorageService:
-    """Persist files to a local directory while mimicking a GCS bucket."""
+    """Persist files to Google Cloud Storage."""
 
-    def __init__(self, bucket_name: str = "investment_memo_ai", base_dir: Optional[Path] = None) -> None:
+    def __init__(self, bucket_name: str) -> None:
+        project_id = os.getenv("GCP_PROJECT_ID")
+        credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+        credentials = None
+        if credentials_path:
+            credentials = service_account.Credentials.from_service_account_file(credentials_path)
+
+        client_kwargs = {}
+        if project_id:
+            client_kwargs["project"] = project_id
+        if credentials is not None:
+            client_kwargs["credentials"] = credentials
+
+        self.client = storage.Client(**client_kwargs)
+        self.bucket = self.client.bucket(bucket_name)
         self.bucket_name = bucket_name
-        self.base_dir = base_dir or Path(".storage")
-        self.base_dir.mkdir(parents=True, exist_ok=True)
 
-    def _object_path(self, deal_id: str, filename: str) -> Path:
-        deal_dir = self.base_dir / deal_id
-        deal_dir.mkdir(parents=True, exist_ok=True)
-        return deal_dir / filename
+    def _blob_path(self, deal_id: str, filename: str) -> str:
+        return f"{deal_id}/{filename}"
 
-    def upload_uploadfile(self, deal_id: str, upload: UploadFile, *, destination: Optional[str] = None) -> str:
-        """Persist an :class:`UploadFile` to storage and return a pseudo gs:// url."""
+    def upload_uploadfile(
+        self, deal_id: str, upload: UploadFile, *, destination: str | None = None
+    ) -> str:
+        """Persist an :class:`UploadFile` to storage and return a gs:// URL."""
 
         target_name = destination or upload.filename or "file"
-        path = self._object_path(deal_id, target_name)
-        data = upload.file.read()
-        if isinstance(data, str):
-            data = data.encode("utf-8")
-        path.write_bytes(data)
+        blob = self.bucket.blob(self._blob_path(deal_id, target_name))
+        upload.file.seek(0)
+        blob.upload_from_file(upload.file, content_type=upload.content_type)
+        upload.file.seek(0)
         return f"gs://{self.bucket_name}/{deal_id}/{target_name}"
 
-    def upload_bytes(self, deal_id: str, filename: str, data: bytes) -> str:
-        path = self._object_path(deal_id, filename)
-        path.write_bytes(data)
+    def upload_bytes(
+        self, deal_id: str, filename: str, data: bytes, *, content_type: str | None = None
+    ) -> str:
+        blob = self.bucket.blob(self._blob_path(deal_id, filename))
+        blob.upload_from_string(data, content_type=content_type)
         return f"gs://{self.bucket_name}/{deal_id}/{filename}"
 
     def upload_fileobj(self, deal_id: str, filename: str, fileobj: BinaryIO) -> str:
-        path = self._object_path(deal_id, filename)
-        path.write_bytes(fileobj.read())
+        blob = self.bucket.blob(self._blob_path(deal_id, filename))
+        fileobj.seek(0)
+        blob.upload_from_file(fileobj)
+        fileobj.seek(0)
         return f"gs://{self.bucket_name}/{deal_id}/{filename}"
 
-    def get_local_path(self, deal_id: str, filename: str) -> Path:
-        path = self._object_path(deal_id, filename)
-        if not path.exists():
+    def download_file(self, deal_id: str, filename: str) -> tuple[BytesIO, str]:
+        blob = self.bucket.get_blob(self._blob_path(deal_id, filename))
+        if blob is None:
             raise FileNotFoundError(f"Object {filename} for deal {deal_id} not found")
-        return path
+        data = blob.download_as_bytes()
+        file_obj = BytesIO(data)
+        file_obj.seek(0)
+        content_type = blob.content_type or "application/octet-stream"
+        return file_obj, content_type
+
+    def delete_file(self, deal_id: str, filename: str) -> None:
+        blob = self.bucket.blob(self._blob_path(deal_id, filename))
+        try:
+            blob.delete()
+        except NotFound:
+            pass
 
     def delete_folder(self, deal_id: str) -> None:
-        deal_dir = self.base_dir / deal_id
-        if deal_dir.exists():
-            shutil.rmtree(deal_dir)
+        prefix = f"{deal_id}/"
+        for blob in self.bucket.list_blobs(prefix=prefix):
+            try:
+                blob.delete()
+            except NotFound:
+                continue
 
