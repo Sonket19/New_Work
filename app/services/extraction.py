@@ -75,7 +75,7 @@ class DocumentExtractor:
         if hasattr(documentai, "ProcessOptions") and hasattr(documentai, "OcrConfig"):
             try:
                 ocr_config = documentai.OcrConfig(enable_imageless_mode=True)
-            except TypeError:  # pragma: no cover - older client libraries
+            except (TypeError, ValueError):  # pragma: no cover - older client libraries
                 ocr_config = None
             if ocr_config is not None:
                 try:
