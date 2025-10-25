@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, File, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 
 from app.dependencies import get_deal_service
 from app.models.deal_models import (
@@ -73,18 +73,20 @@ def delete_deal(
 def download_memo(
     deal_id: str,
     service: DealService = Depends(get_deal_service),
-) -> FileResponse:
-    path = service.download_memo(deal_id)
-    return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+) -> StreamingResponse:
+    file_obj, filename, content_type = service.download_memo(deal_id)
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return StreamingResponse(file_obj, media_type=content_type, headers=headers)
 
 
 @router.get("/download_pitch_deck/{deal_id}")
 def download_pitch_deck(
     deal_id: str,
     service: DealService = Depends(get_deal_service),
-) -> FileResponse:
-    path = service.download_pitch_deck(deal_id)
-    return FileResponse(path)
+) -> StreamingResponse:
+    file_obj, filename, content_type = service.download_pitch_deck(deal_id)
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return StreamingResponse(file_obj, media_type=content_type, headers=headers)
 
 
 @router.post("/deals/{deal_id}/founder_invite", response_model=FounderInviteResponse)
