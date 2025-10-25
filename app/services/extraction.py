@@ -5,7 +5,19 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from google.cloud import documentai_v1 as documentai
+try:
+    from google.cloud import documentai_v1 as documentai
+except ImportError:  # pragma: no cover - support environments with older client versions
+    try:
+        from google.cloud import documentai  # type: ignore[no-redef]
+    except ImportError as import_error:  # pragma: no cover - surfaced at runtime
+        documentai = None  # type: ignore[assignment]
+        _DOCUMENT_AI_IMPORT_ERROR = import_error  # type: ignore[name-defined]
+    else:  # pragma: no cover - only executed with legacy package layout
+        _DOCUMENT_AI_IMPORT_ERROR = None  # type: ignore[name-defined]
+else:
+    _DOCUMENT_AI_IMPORT_ERROR = None  # type: ignore[name-defined]
+
 from google.oauth2 import service_account
 
 
@@ -21,6 +33,12 @@ class DocumentExtractor:
         credentials_path: Optional[str] = None,
         client: Optional[documentai.DocumentProcessorServiceClient] = None,
     ) -> None:
+        if documentai is None:  # pragma: no cover - runtime guard for missing dependency
+            raise RuntimeError(
+                "google-cloud-documentai is required for DocumentExtractor. "
+                "Install the library and ensure it is available to the application."
+            ) from _DOCUMENT_AI_IMPORT_ERROR
+
         env_project = project_id or os.getenv("GCP_PROJECT_ID")
         env_location = location or os.getenv("GCP_LOCATION")
         env_processor = processor_id or os.getenv("DOCUMENT_AI_PROCESSOR")
